@@ -1,5 +1,5 @@
 # Ignore directories
-jpl_ephemeris_data/output_files/*
+jpl_ephemeris_data/output_files*
 build/
 
 # Ignore compiled object files

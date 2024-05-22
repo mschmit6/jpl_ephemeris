@@ -9,39 +9,89 @@ import os
 # Utility Functions
 #--------------------------------------
 
-def get_header_table(header_file):
+def parse_header_file(header_file):
     """
     Pull the table out of the DE header file, which is located between the tags "GROUP   1050" and "GROUP   1070"
     
     Returns:
         ndarray: Numpy array containing the header table 
+        float: Earth/Moon mass ratio
 
     """
+
+    def parse_group_1040(lines_group_1040):
+        """
+        Simply identify the index in the block for EMRAT
+        """
+        lines_group_1040 = lines_group_1040[2:]
+
+        split_block = []
+        for line in lines_group_1040:
+            if line.strip() == "":
+                continue
+            else:
+                split_block.extend(line.strip().split())
+
+        # Now identify index of EMRAT
+        for ind, val in enumerate(split_block):
+            if val == "EMRAT":
+                return ind
+
+        return None
+
+    def parse_group_1041(lines_group_1041, emrat_ind):
+        """
+        Return the Earth/Moon mass ratio
+        """
+        lines_group_1041 = lines_group_1041[2:]
+
+        split_block = []
+        for line in lines_group_1041:
+            if line.strip() == "":
+                continue
+            else:
+                split_block.extend(line.strip().split())
+
+        return float(split_block[emrat_ind].replace("D", "e"))
+        
+    def parse_group_1050(lines_group_1050):
+        # Put the header lines into a numpy array
+        jpl_ephem_header = []
+        for line in lines_group_1050:
+            if line.strip() == "":
+                continue
+            else:
+                jpl_ephem_header.append(list(map(int, line.strip().split())))
+        return jpl_ephem_header
 
     with open(header_file, 'r') as fID:
         lines = fID.readlines()
 
+    # Parse the file into groupes
+    group = None
+    group_lines = {'1040': [], '1041': [], '1050': []}
+
     # Discard the lines until we get to the line containing "GROUP   1050"
-    start_ind = 0
-    for ind, line in enumerate(lines):
-        if "GROUP" in line and "1050" in line:
-            # At this point we process the header file 
-            start_ind = ind +1
-            break
-
-    # Put the header lines into a numpy array
-    jpl_ephem_header = []
-    for ind in range(start_ind, len(lines)):
-        cur_line = lines[ind]
-
-        if "GROUP" in cur_line and "1070" in cur_line:
-            break
-        elif cur_line.strip() == "":
+    for line in lines:
+        if "GROUP" in line:
+            group = line.split()[1].strip()
+            continue
+        elif group is None:
             continue
         else:
-            jpl_ephem_header.append(list(map(int, cur_line.strip().split())))
+            if group == "1040":
+                group_lines['1040'].append(line)
+            elif group == "1041":
+                group_lines['1041'].append(line)
+            elif group == "1050":
+                group_lines['1050'].append(line)
 
-    return numpy.asarray(jpl_ephem_header)
+    emrat_ind = parse_group_1040(group_lines['1040'])
+    if emrat_ind is None:
+        raise Exception("Failed to parse out the EMRAT value from header file")
+    emratio = parse_group_1041(group_lines['1041'], emrat_ind)
+    jpl_ephem_header = parse_group_1050(group_lines['1050'])
+    return emratio, numpy.asarray(jpl_ephem_header)
 
 #---------------------------------------------------------------------------------------------------------------------------
 
@@ -242,13 +292,14 @@ def duplicate_start_date(start_mjdj2k_vals, cur_mjd_start):
 
 #---------------------------------------------------------------------------------------------------------------------------
 
-def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float, celestial_body: CelestialBodies,
-                            jpl_ephem_header: numpy.ndarray):
+def generate_ephemeris_file(line_blocks: list, em_ratio: float, mjdj2k_0: float, mjdj2k_f: float, 
+                            celestial_body: CelestialBodies, jpl_ephem_header: numpy.ndarray):
     """
     Extract the Chebyshev coefficients for the specified liens, given an initial and final MJD from the J2000 Epoch
 
     Arguments:
         line_blocks (list[list]): List of floating point values representing each block
+        em_ratio (float): Earth/Moon mass ratio
         mjdj2k_0 (float): Initial value of MJD from the J2000 Epoch
         mjdj2k_f (float): Final value of MJD from the J2000 Epoch
         celestial_body (CelestialBodies): Celestial body to extract
@@ -261,7 +312,7 @@ def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float,
 
     if celestial_body == CelestialBodies.EarthFromEMB:
         # Have to do extra work to compute the position of Earth relative to EMB
-        generate_earth_relative_to_barycenter_file(line_blocks, mjdj2k_0, mjdj2k_f, jpl_ephem_header)
+        generate_earth_relative_to_barycenter_file(line_blocks, em_ratio, mjdj2k_0, mjdj2k_f, jpl_ephem_header)
 
     else:
         # Get table parameters for the body
@@ -323,22 +374,23 @@ def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float,
 
         if celestial_body != CelestialBodies.Moon:
             write_to_file("{}_position.txt".format(celestial_body.name), NUM_COEFF + 2, DAYS_PER_POLY, x_chebyshev_str,
-                        y_chebyshev_str, z_chebyshev_str, "ICRF{}FromSSBTable".format(celestial_body.name))
+                        y_chebyshev_str, z_chebyshev_str, "{}FromSSBGCRFTable".format(celestial_body.name))
         else:
             write_to_file("{}_position.txt".format(celestial_body.name), NUM_COEFF + 2, DAYS_PER_POLY, x_chebyshev_str,
-                        y_chebyshev_str, z_chebyshev_str, "ICRF{}Table".format(celestial_body.name))
+                        y_chebyshev_str, z_chebyshev_str, "{}GCRFTable".format(celestial_body.name))
 
         return x_chebyshev_str, y_chebyshev_str, z_chebyshev_str
 
 #---------------------------------------------------------------------------------------------------------------------------
 
-def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float, 
+def generate_earth_relative_to_barycenter_file(line_blocks: list, em_ratio: float, mjdj2k_0: float, mjdj2k_f: float, 
                                                jpl_ephem_header: numpy.ndarray):
     """
     Extract the Chebyshev coefficients for the Earth's position relative to the Earth-Moon-Barycenter
 
     Arguments:
         line_blocks (list[list]): List of floating point values representing each block
+        em_ratio (float): Earth/Moon mass ratio
         mjdj2k_0 (float): Initial value of MJD from the J2000 Epoch
         mjdj2k_f (float): Final value of MJD from the J2000 Epoch
         jpl_ephem_header (numpy.ndarray): Numpy array containing the header table 
@@ -350,7 +402,6 @@ def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: floa
 
     # Get the Chebyshev parameters for the Moon, and will adjust
     START_IND, END_IND, NUM_COEFF, NUM_POLY, DAYS_PER_POLY = get_table_parameters(CelestialBodies.Moon, jpl_ephem_header)
-    EM_RATIO = 0.813005683381650925e02
 
     x_chebyshev_str = []
     y_chebyshev_str = []
@@ -371,7 +422,7 @@ def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: floa
         moon_coeff = block[START_IND:END_IND]
 
         # Compute the position of moon relative to EM-barycenter
-        earth_rel_embary = [-v / (1 + EM_RATIO) for v in moon_coeff]
+        earth_rel_embary = [-v / (1 + em_ratio) for v in moon_coeff]
 
 
         # Process coefficients for Each polynomial
@@ -383,7 +434,6 @@ def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: floa
 
             # Prevent duplicate start dates
             if duplicate_start_date(start_mjdj2k_vals, cur_mjd_start):
-                print("Duplicate start date: {}".format(cur_mjd_start))
                 continue
             start_mjdj2k_vals.append(cur_mjd_start)
 
@@ -407,8 +457,8 @@ def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: floa
             # Add NUM_COEFF so the next X value starts off properly
             cur_ind += NUM_COEFF
 
-    write_to_file("earth_relative_to_em_barycenter.txt", NUM_COEFF + 2, DAYS_PER_POLY, x_chebyshev_str,
-                  y_chebyshev_str, z_chebyshev_str, "GCRFEarthFromEMBTable")
+    write_to_file("earth_relative_to_emb.txt", NUM_COEFF + 2, DAYS_PER_POLY, x_chebyshev_str,
+                  y_chebyshev_str, z_chebyshev_str, "EarthFromEMBGCRFTable")
 
     return x_chebyshev_str, y_chebyshev_str, z_chebyshev_str
 
@@ -422,7 +472,7 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok = True)
 
     # Parse the header table
-    jpl_ephem_header = get_header_table("de_{}/header.430_572".format(ephem_number))
+    emratio, jpl_ephem_header = parse_header_file("de_{}/header.430_572".format(ephem_number))
 
     # Parse the desired files
     file_names = ["de_{}/ascp1950.430".format(ephem_number), "de_{}/ascp2050.430".format(ephem_number)]
@@ -436,4 +486,4 @@ if __name__ == "__main__":
     os.chdir(output_dir)
 
     for celestial_body in CelestialBodies:
-        generate_ephemeris_file(block_lines, mjdj2k_0, mjdj2k_f, celestial_body, jpl_ephem_header)
+        generate_ephemeris_file(block_lines, emratio, mjdj2k_0, mjdj2k_f, celestial_body, jpl_ephem_header)

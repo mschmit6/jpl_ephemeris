@@ -66,7 +66,6 @@ std::array<double, 3> compute_cspice_pos(double mjdj2k_tdb, CentralBody targ, Ce
     SpiceDouble et = mjdj2k_tdb * 86400.0; // Seconds past J2000 Epoch in TDB time system
     std::string abcorr = "NONE";
     std::string frame = "J2000";
-    std::cout << "Et = " << et << "\n"; 
 
     SpiceDouble pos[3];
     SpiceDouble lt;
@@ -130,37 +129,43 @@ std::string to_string(CentralBody cb) {
 
 int main() {
     // Load in the SPK kernel from https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/
-    furnsh_c("src/de438.bsp");
+    furnsh_c("src/de430_1850-2150.bsp");
     
     // Set inputs
-    double mjdj2k_tdb = 1000.0;
-    double step = 100; 
+    double mjdj2k_tdb = 0.0;
+    double step = 1000; 
 
     std::array<CentralBody, 3> target_bodies{CentralBody::Sun, CentralBody::Earth, CentralBody::Moon}; 
     std::array<CentralBody, 4> central_bodies{CentralBody::SSB, CentralBody::Sun, CentralBody::Earth, CentralBody::Moon}; 
 
-    while (mjdj2k_tdb <= 10000) {
+    while (mjdj2k_tdb <= 35000) {
         std::cout << "\n\n-------------------------------------------------------------------\n";
-        std::cout << "mjdj2k_tdb:   " << mjdj2k_tdb << "\n"; 
+        std::cout << "mjdj2k_tdb: " << mjdj2k_tdb << "\n"; 
         std::cout << "-------------------------------------------------------------------\n";
 
         for (CentralBody central_body : central_bodies) {
                 std::cout << "    Central Body: " << to_string(central_body) << "\n"; 
 
             for (CentralBody tgt_body : target_bodies) {
-                std::cout << "        Target Body:  " << to_string(tgt_body) << "\n"; 
+                std::cout << "        Target Body: " << to_string(tgt_body) << "\n"; 
 
 
                 // Compute the position of the Moon w.r.t. the Sun
                 std::array<double, 3> cspice_sun_pos = compute_cspice_pos(mjdj2k_tdb, tgt_body, central_body); 
-                print_array("        cspice_sun_pos", cspice_sun_pos); 
 
                 // Compute the position of the Sun w.r.t. the Moon
                 std::array<double, 3> jpl_ephem_sun_pos = compute_jpl_ephem_pos(mjdj2k_tdb, tgt_body, central_body); 
-                print_array("        jpl_ephem_sun_pos", jpl_ephem_sun_pos); 
 
                 // Compute the error:
-                std::cout << "        Error: " << std::to_string(compute_error(cspice_sun_pos, jpl_ephem_sun_pos)) << "\n\n"; 
+                double err = compute_error(cspice_sun_pos, jpl_ephem_sun_pos); 
+
+                if (err > 1e-6) {
+                    print_array("        cspice_sun_pos", cspice_sun_pos); 
+                    print_array("        jpl_ephem_sun_pos", jpl_ephem_sun_pos); 
+                    std::cout << "        Error: " << err << "\n\n"; 
+                } else {
+                    std::cout << "            Error Below 1 millimeter Tolerance\n"; 
+                }
             }
         }
 
