@@ -14,6 +14,8 @@
 #include <jpl_ephemeris.hpp>
 using namespace jpl_ephemeris; 
 
+//--------------------------------------------------------------------------------------------------------------------------
+
 std::array<double, 3> compute_cspice_pos(double mjdj2k_tdb, CentralBody targ, CentralBody central_body) {
     // Start recording runtime
     auto start = std::chrono::high_resolution_clock::now();
@@ -75,10 +77,9 @@ std::array<double, 3> compute_cspice_pos(double mjdj2k_tdb, CentralBody targ, Ce
     return std::array<double, 3>{pos[0], pos[1], pos[2]};
 }
 
-std::array<double, 3> compute_jpl_ephem_pos(double mjdj2k_tdb, CentralBody targ, CentralBody central_body) {
-    // Start recording runtime
-    auto start = std::chrono::high_resolution_clock::now();
+//--------------------------------------------------------------------------------------------------------------------------
 
+std::array<double, 3> compute_jpl_ephem_pos(double mjdj2k_tdb, CentralBody targ, CentralBody central_body) {
     switch (targ) {
         case CentralBody::Moon: {
             return Moon::get_position(mjdj2k_tdb, central_body); 
@@ -95,9 +96,13 @@ std::array<double, 3> compute_jpl_ephem_pos(double mjdj2k_tdb, CentralBody targ,
     }
 }
 
+//--------------------------------------------------------------------------------------------------------------------------
+
 void print_array(const std::string& prefix, const std::array<double, 3>& arr) {
     std::cout << prefix << std::setprecision(15) << " = [" << arr[0] << ", " << arr[1] << ", " << arr[2] << "]\n"; 
 }
+
+//--------------------------------------------------------------------------------------------------------------------------
 
 double compute_error(const std::array<double, 3>& truth, const std::array<double, 3>& est) {
     double err = 0.; 
@@ -106,6 +111,8 @@ double compute_error(const std::array<double, 3>& truth, const std::array<double
     }
     return std::sqrt(err); 
 }
+
+//--------------------------------------------------------------------------------------------------------------------------
 
 std::string to_string(CentralBody cb) {
     switch (cb) {
@@ -127,44 +134,43 @@ std::string to_string(CentralBody cb) {
     }
 }
 
-int main() {
-    // Load in the SPK kernel from https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/
-    furnsh_c("src/de430_1850-2150.bsp");
-    
-    // Set inputs
-    double mjdj2k_tdb = 0.0;
-    double step = 1000; 
+//--------------------------------------------------------------------------------------------------------------------------
 
-    std::array<CentralBody, 3> target_bodies{CentralBody::Sun, CentralBody::Earth, CentralBody::Moon}; 
-    std::array<CentralBody, 4> central_bodies{CentralBody::SSB, CentralBody::Sun, CentralBody::Earth, CentralBody::Moon}; 
+void accuracy_test(double mjdj2k_tdb, double step, const std::array<CentralBody, 3>& target_bodies, 
+                   const std::array<CentralBody, 4>& central_bodies, double err_tol = 1e-6) {
 
+    // Quick struct to store any errors above the specified tolerance
+    struct EphemerisErrorEntry {
+        EphemerisErrorEntry(double mjdj2k_tdb, CentralBody central_body, CentralBody tgt_body, 
+                       const std::array<double, 3>& cspice_pos, const std::array<double, 3>& jpl_ephem_pos, double err) :
+                       mjdj2k_tdb(mjdj2k_tdb), central_body(central_body), tgt_body(tgt_body), cspice_pos(cspice_pos), 
+                       jpl_ephem_pos(jpl_ephem_pos), err(err){
+
+                       }
+
+        double mjdj2k_tdb; 
+        CentralBody central_body;
+        CentralBody tgt_body; 
+        std::array<double, 3> cspice_pos;
+        std::array<double, 3> jpl_ephem_pos;
+        double err; 
+    };
+
+    std::vector<EphemerisErrorEntry> error_entries; 
     while (mjdj2k_tdb <= 35000) {
-        std::cout << "\n\n-------------------------------------------------------------------\n";
-        std::cout << "mjdj2k_tdb: " << mjdj2k_tdb << "\n"; 
-        std::cout << "-------------------------------------------------------------------\n";
-
         for (CentralBody central_body : central_bodies) {
-                std::cout << "    Central Body: " << to_string(central_body) << "\n"; 
-
             for (CentralBody tgt_body : target_bodies) {
-                std::cout << "        Target Body: " << to_string(tgt_body) << "\n"; 
-
-
                 // Compute the position of the Moon w.r.t. the Sun
-                std::array<double, 3> cspice_sun_pos = compute_cspice_pos(mjdj2k_tdb, tgt_body, central_body); 
+                std::array<double, 3> cspice_pos = compute_cspice_pos(mjdj2k_tdb, tgt_body, central_body); 
 
                 // Compute the position of the Sun w.r.t. the Moon
-                std::array<double, 3> jpl_ephem_sun_pos = compute_jpl_ephem_pos(mjdj2k_tdb, tgt_body, central_body); 
+                std::array<double, 3> jpl_ephem_pos = compute_jpl_ephem_pos(mjdj2k_tdb, tgt_body, central_body); 
 
                 // Compute the error:
-                double err = compute_error(cspice_sun_pos, jpl_ephem_sun_pos); 
+                double err = compute_error(cspice_pos, jpl_ephem_pos); 
 
-                if (err > 1e-6) {
-                    print_array("        cspice_sun_pos", cspice_sun_pos); 
-                    print_array("        jpl_ephem_sun_pos", jpl_ephem_sun_pos); 
-                    std::cout << "        Error: " << err << "\n\n"; 
-                } else {
-                    std::cout << "            Error Below 1 millimeter Tolerance\n"; 
+                if (err > err_tol) {
+                    error_entries.emplace_back(mjdj2k_tdb, central_body, tgt_body, cspice_pos, jpl_ephem_pos, err); 
                 }
             }
         }
@@ -172,5 +178,79 @@ int main() {
         mjdj2k_tdb += step; 
     }
 
+    // Print out any occurrences where the error was above the tolerance 
+    if (error_entries.size() == 0) {
+        std::cout << "No errors exceeded the tolerance of " + std::to_string(err_tol) + " km\n\n"; 
+    } else {
+        for (const auto& err_entry : error_entries) {
+            std::cout << "mjdj2k_tdb = " << err_entry.mjdj2k_tdb << "\n"; 
+            std::cout << "central_body = " << to_string(err_entry.central_body) << "\n"; 
+            std::cout << "tgt_body = " << to_string(err_entry.tgt_body) << "\n"; 
+            print_array("cspice_pos", err_entry.cspice_pos); 
+            print_array("jpl_ephem_pos", err_entry.jpl_ephem_pos); 
+            std::cout << "mjdj2k_tdb = " << err_entry.err << "\n\n"; 
+        }
+    }
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
+
+void compute_runtimes(double mjdj2k_tdb_0, double step, const std::array<CentralBody, 3>& target_bodies, 
+                   const std::array<CentralBody, 4>& central_bodies, double err_tol = 1e-6) {
+
+    // Record runtime for cspice library 
+    auto start = std::chrono::high_resolution_clock::now();
+    double mjdj2k_tdb = mjdj2k_tdb_0;
+    while (mjdj2k_tdb <= 35000) {
+        for (CentralBody central_body : central_bodies) {
+            for (CentralBody tgt_body : target_bodies) {
+                // Compute the position of the Moon w.r.t. the Sun
+                std::array<double, 3> cspice_pos = compute_cspice_pos(mjdj2k_tdb, tgt_body, central_body); 
+            }
+        }
+
+        mjdj2k_tdb += step; 
+    }
+    auto stop = std::chrono::high_resolution_clock::now();
+    double duration_cspice = std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count() * 1e-6;
+
+    // Record runtime for jpl_ephemeris library 
+    start = std::chrono::high_resolution_clock::now();
+    mjdj2k_tdb = mjdj2k_tdb_0;
+    while (mjdj2k_tdb <= 35000) {
+        for (CentralBody central_body : central_bodies) {
+            for (CentralBody tgt_body : target_bodies) {
+                // Compute the position of the Sun w.r.t. the Moon
+                std::array<double, 3> jpl_ephem_pos = compute_jpl_ephem_pos(mjdj2k_tdb, tgt_body, central_body); 
+            }
+        }
+
+        mjdj2k_tdb += step; 
+    }
+    stop = std::chrono::high_resolution_clock::now();
+    double duration_jpl_ephem = std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count() * 1e-6;
+
+    std::cout << "CSPICE Runtime:    " << std::to_string(duration_cspice) << " sec\n"; 
+    std::cout << "jpl_ephem Runtime: " << std::to_string(duration_jpl_ephem) << " sec\n"; 
+    std::cout << "Speedup:           " << std::to_string(duration_cspice / duration_jpl_ephem) << "\n\n"; 
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
+
+int main() {
+    // Load in the SPK kernel from https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/
+    furnsh_c("src/de430_1850-2150.bsp");
+    
+    // Set inputs
+    double mjdj2k_tdb = 0.0;
+    double step = 1000; 
+    std::array<CentralBody, 3> target_bodies{CentralBody::Sun, CentralBody::Earth, CentralBody::Moon}; 
+    std::array<CentralBody, 4> central_bodies{CentralBody::SSB, CentralBody::Sun, CentralBody::Earth, CentralBody::Moon}; 
+
+    // Run the accuracy test
+    accuracy_test(mjdj2k_tdb, step, target_bodies, central_bodies);
+
+    // Now compute runtimes
+    compute_runtimes(mjdj2k_tdb, 100, target_bodies, central_bodies);
     return 0;
 }
