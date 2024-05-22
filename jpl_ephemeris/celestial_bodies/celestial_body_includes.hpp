@@ -7,5 +7,9 @@
  */
 
 #include "jpl_ephemeris/celestial_bodies/ephemeris_tables/ephemeris_table_includes.hpp"
+#include "jpl_ephemeris/celestial_bodies/central_body.hpp"
+#include "jpl_ephemeris/celestial_bodies/earth.hpp"
+#include "jpl_ephemeris/celestial_bodies/moon.hpp"
+#include "jpl_ephemeris/celestial_bodies/sun.hpp"
 
 #endif

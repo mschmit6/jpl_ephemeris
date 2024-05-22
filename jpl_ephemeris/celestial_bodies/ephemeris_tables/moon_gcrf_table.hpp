@@ -20,6 +20,8 @@ namespace jpl_ephemeris {
 /*!
  * \brief Static class containing the CSpice Chebyshev polynomial coefficients required to compute the high-fidelity position
  * of the Moon relative to the Earth in the GCRF frame.
+ * 
+ * \attention This uses the DE430 JPL Ephemeris tables
  */
 class MoonGCRFTable : public JPLEphemerisTable {
     public:

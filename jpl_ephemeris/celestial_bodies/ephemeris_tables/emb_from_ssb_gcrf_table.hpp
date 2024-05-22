@@ -20,6 +20,8 @@ namespace jpl_ephemeris {
 /*!
  * \brief Static class containing the CSpice Chebyshev polynomial coefficients required to compute the high-fidelity position
  * of the Earth-Moon Barycenter (EMB) relative to the Solar System Barycenter (SSB) in the GCRF frame.
+ * 
+ * \attention This uses the DE430 JPL Ephemeris tables
  */
 class EMBFromSSBGCRFTable : public JPLEphemerisTable {
     public:
@@ -65,13 +67,13 @@ class EMBFromSSBGCRFTable : public JPLEphemerisTable {
         //! Number of days covered by each set of polynomial coefficients
         static constexpr double days_per_poly_ = 16;
 
-        //! Chebyshev polynomial coefficients for the x-coordinate (km)
+        //! Chebyshev polynomial coefficients for the x-coordinate [km]
         static std::array<std::array<double, 15>, 2284> x_interp_;
 
-        //! Chebyshev polynomial coefficients for the y-coordinate (km)
+        //! Chebyshev polynomial coefficients for the y-coordinate [km]
         static std::array<std::array<double, 15>, 2284> y_interp_;
 
-        //! Chebyshev polynomial coefficients for the z-coordinate (km)
+        //! Chebyshev polynomial coefficients for the z-coordinate [km]
         static std::array<std::array<double, 15>, 2284> z_interp_;
 };
 

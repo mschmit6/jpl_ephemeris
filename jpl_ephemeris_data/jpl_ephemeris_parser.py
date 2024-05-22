@@ -9,16 +9,45 @@ import os
 # Utility Functions
 #--------------------------------------
 
-# Note this comes from the header.438 file
-jpl_ephem_header = numpy.array([[ 3, 171, 231, 309, 342, 366, 387, 405, 423, 441, 753, 819, 899, 1019, 1019],
-                                [14,  10,  13,  11,   8,   7,   6,   6,   6,  13,  11,  10,  10,    0,    0],
-                                [ 4,   2,   2,   1,   1,   1,   1,   1,   1,   8,   2,   4,   4,    0,    0]])
+def get_header_table(header_file):
+    """
+    Pull the table out of the DE header file, which is located between the tags "GROUP   1050" and "GROUP   1070"
+    
+    Returns:
+        ndarray: Numpy array containing the header table 
+
+    """
+
+    with open(header_file, 'r') as fID:
+        lines = fID.readlines()
+
+    # Discard the lines until we get to the line containing "GROUP   1050"
+    start_ind = 0
+    for ind, line in enumerate(lines):
+        if "GROUP" in line and "1050" in line:
+            # At this point we process the header file 
+            start_ind = ind +1
+            break
+
+    # Put the header lines into a numpy array
+    jpl_ephem_header = []
+    for ind in range(start_ind, len(lines)):
+        cur_line = lines[ind]
+
+        if "GROUP" in cur_line and "1070" in cur_line:
+            break
+        elif cur_line.strip() == "":
+            continue
+        else:
+            jpl_ephem_header.append(list(map(int, cur_line.strip().split())))
+
+    return numpy.asarray(jpl_ephem_header)
 
 #---------------------------------------------------------------------------------------------------------------------------
 
 class CelestialBodies(IntEnum):
     """
-    Celestial bodies in the order that they appear in the JPL ephemeris header
+    Celestial bodies in the order that they appear in the JPL ephemeris header. An example table is shown below
 
     GROUP   1050
 
@@ -43,12 +72,13 @@ class CelestialBodies(IntEnum):
 
 #---------------------------------------------------------------------------------------------------------------------------
 
-def get_table_parameters(celestial_body: CelestialBodies):
+def get_table_parameters(celestial_body: CelestialBodies, jpl_ephem_header: numpy.ndarray):
     """
     Get start index, end index, and number of polynomials for each Celestial Body
 
     Arguments:
         celestial_body (CelestialBodies): Enum value representing the celestial body
+        jpl_ephem_header (numpy.ndarray): Numpy array containing the header table 
 
     Returns:
         tuple: Tuple containing the following values
@@ -138,7 +168,7 @@ def write_to_file(file_name: str, num_entries, days_per_poly, x_coeff_str, y_coe
 
     """
 
-    with open("output_files/{}".format(file_name), 'w') as fID:
+    with open("{}".format(file_name), 'w') as fID:
 
         # Write number of days per poly at the top
         fID.write("static constexpr double days_per_poly_ = {};\n".format(days_per_poly))
@@ -199,7 +229,21 @@ def convert_to_float(words):
 
 #---------------------------------------------------------------------------------------------------------------------------
 
-def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float, celestial_body: CelestialBodies):
+def duplicate_start_date(start_mjdj2k_vals, cur_mjd_start):
+    """
+    Function to prevent duplicate start dates when multiple files are used
+    
+    """
+    for mj2jdk_val in start_mjdj2k_vals:
+        if cur_mjd_start == mj2jdk_val:
+            return True
+
+    return False
+
+#---------------------------------------------------------------------------------------------------------------------------
+
+def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float, celestial_body: CelestialBodies,
+                            jpl_ephem_header: numpy.ndarray):
     """
     Extract the Chebyshev coefficients for the specified liens, given an initial and final MJD from the J2000 Epoch
 
@@ -208,6 +252,7 @@ def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float,
         mjdj2k_0 (float): Initial value of MJD from the J2000 Epoch
         mjdj2k_f (float): Final value of MJD from the J2000 Epoch
         celestial_body (CelestialBodies): Celestial body to extract
+        jpl_ephem_header (numpy.ndarray): Numpy array containing the header table 
 
     Returns:
         (list, list, list): String representation of Chebyshev interpolants for x, y, z values of position
@@ -216,16 +261,17 @@ def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float,
 
     if celestial_body == CelestialBodies.EarthFromEMB:
         # Have to do extra work to compute the position of Earth relative to EMB
-        generate_earth_relative_to_barycenter_file(line_blocks, mjdj2k_0, mjdj2k_f)
+        generate_earth_relative_to_barycenter_file(line_blocks, mjdj2k_0, mjdj2k_f, jpl_ephem_header)
 
     else:
         # Get table parameters for the body
-        START_IND, END_IND, NUM_COEFF, NUM_POLY, DAYS_PER_POLY = get_table_parameters(celestial_body)
+        START_IND, END_IND, NUM_COEFF, NUM_POLY, DAYS_PER_POLY = get_table_parameters(celestial_body, jpl_ephem_header)
 
         x_chebyshev_str = []
         y_chebyshev_str = []
         z_chebyshev_str = []
-
+        start_mjdj2k_vals = []
+        
         for block in line_blocks:
 
             # First, pull out start/stop jd and convert to MJD_J2k
@@ -245,6 +291,11 @@ def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float,
                 # Set the start/stop MJD values
                 cur_mjd_start = mjdj2k_start + DAYS_PER_POLY * k
                 cur_mjd_stop = cur_mjd_start + DAYS_PER_POLY
+
+                # Prevent duplicate start dates
+                if duplicate_start_date(start_mjdj2k_vals, cur_mjd_start):
+                    continue
+                start_mjdj2k_vals.append(cur_mjd_start)
 
                 # Extract x coefficients
                 x_coeff = coeff[cur_ind:(cur_ind + NUM_COEFF)]
@@ -266,6 +317,10 @@ def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float,
                 # Add NUM_COEFF so the next X value starts off properly
                 cur_ind += NUM_COEFF
 
+            # Set the previous stop value so that we don't allow overlap between tables
+            prev_mjdj2k_stop = int(mjdj2k_stop)
+
+
         if celestial_body != CelestialBodies.Moon:
             write_to_file("{}_position.txt".format(celestial_body.name), NUM_COEFF + 2, DAYS_PER_POLY, x_chebyshev_str,
                         y_chebyshev_str, z_chebyshev_str, "ICRF{}FromSSBTable".format(celestial_body.name))
@@ -277,7 +332,8 @@ def generate_ephemeris_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float,
 
 #---------------------------------------------------------------------------------------------------------------------------
 
-def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float):
+def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: float, mjdj2k_f: float, 
+                                               jpl_ephem_header: numpy.ndarray):
     """
     Extract the Chebyshev coefficients for the Earth's position relative to the Earth-Moon-Barycenter
 
@@ -285,6 +341,7 @@ def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: floa
         line_blocks (list[list]): List of floating point values representing each block
         mjdj2k_0 (float): Initial value of MJD from the J2000 Epoch
         mjdj2k_f (float): Final value of MJD from the J2000 Epoch
+        jpl_ephem_header (numpy.ndarray): Numpy array containing the header table 
 
     Returns:
         (list, list, list): String representation of Chebyshev interpolants for x, y, z values of position
@@ -292,12 +349,13 @@ def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: floa
     """
 
     # Get the Chebyshev parameters for the Moon, and will adjust
-    START_IND, END_IND, NUM_COEFF, NUM_POLY, DAYS_PER_POLY = get_table_parameters(CelestialBodies.Moon)
+    START_IND, END_IND, NUM_COEFF, NUM_POLY, DAYS_PER_POLY = get_table_parameters(CelestialBodies.Moon, jpl_ephem_header)
     EM_RATIO = 0.813005683381650925e02
 
     x_chebyshev_str = []
     y_chebyshev_str = []
     z_chebyshev_str = []
+    start_mjdj2k_vals = []
 
     for block in line_blocks:
 
@@ -322,6 +380,12 @@ def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: floa
             # Set the start/stop MJD values
             cur_mjd_start = mjdj2k_start + DAYS_PER_POLY * k
             cur_mjd_stop = cur_mjd_start + DAYS_PER_POLY
+
+            # Prevent duplicate start dates
+            if duplicate_start_date(start_mjdj2k_vals, cur_mjd_start):
+                print("Duplicate start date: {}".format(cur_mjd_start))
+                continue
+            start_mjdj2k_vals.append(cur_mjd_start)
 
             # Extract x coefficients
             x_coeff = earth_rel_embary[cur_ind:(cur_ind + NUM_COEFF)]
@@ -353,15 +417,23 @@ def generate_earth_relative_to_barycenter_file(line_blocks: list, mjdj2k_0: floa
 
 if __name__ == "__main__":
     # Make output directory
-    os.makedirs("output_files", exist_ok = True)
+    ephem_number = "430"
+    output_dir = "output_files_de_{}".format(ephem_number)
+    os.makedirs(output_dir, exist_ok = True)
+
+    # Parse the header table
+    jpl_ephem_header = get_header_table("de_{}/header.430_572".format(ephem_number))
 
     # Parse the desired files
-    file_names = ["de_438/ascp01950.438", "de_438/ascp02050.438"]
+    file_names = ["de_{}/ascp1950.430".format(ephem_number), "de_{}/ascp2050.430".format(ephem_number)]
     block_lines = read_in_blocks(file_names)
 
     # Parse from 2000-1-1T12:00:00 to 2100-1-1T12:00:00, TT
     mjdj2k_0 = 0
     mjdj2k_f = 36525
 
+    # Change to the output directory so we can write files there cleanly 
+    os.chdir(output_dir)
+
     for celestial_body in CelestialBodies:
-        generate_ephemeris_file(block_lines, mjdj2k_0, mjdj2k_f, celestial_body)
+        generate_ephemeris_file(block_lines, mjdj2k_0, mjdj2k_f, celestial_body, jpl_ephem_header)

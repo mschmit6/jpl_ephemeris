@@ -1,0 +1,2 @@
+*.bsp filter=lfs diff=lfs merge=lfs -text
+example/cspice_comparison/src/de438.bsp filter=lfs diff=lfs merge=lfs -text

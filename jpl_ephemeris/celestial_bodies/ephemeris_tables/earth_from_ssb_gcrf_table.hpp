@@ -20,6 +20,8 @@ namespace jpl_ephemeris {
 /*!
  * \brief Static class containing the CSpice Chebyshev polynomial coefficients required to compute the high-fidelity position
  * of the Earth relative to the Solar System Barycenter (SSB) in the GCRF frame.
+ * 
+ * \attention This uses the DE430 JPL Ephemeris tables
  */
 class EarthFromSSBGCRFTable : public JPLEphemerisTable {
     public:
