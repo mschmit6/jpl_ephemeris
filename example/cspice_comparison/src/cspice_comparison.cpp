@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <random>
 
 // cspice includes
 #include <cspice/SpiceUsr.h>
@@ -237,6 +238,60 @@ void compute_runtimes(double mjdj2k_tdb_0, double step, const std::array<Central
 
 //--------------------------------------------------------------------------------------------------------------------------
 
+void compute_sun_position_runtime() {
+
+    // Generate random number generator engine
+    double lower_bound = 0;
+    double upper_bound = 36525;
+    std::uniform_real_distribution<double> unif(lower_bound, upper_bound);
+    std::default_random_engine re;
+ 
+    // Getting a random double value
+    double random_double = unif(re);
+
+    std::vector<double> cspice_runtimes, jpl_ephem_runtimes; 
+
+    // Record runtime for cspice library 
+    for (unsigned int k = 0; k < 10000; k++) {
+        // Get a random MJD within the bounds of the jpl_ephem tool
+        double mjdj2k_tdb = unif(re);
+
+        // Compute the position using cspice
+        auto start = std::chrono::high_resolution_clock::now();
+        std::array<double, 3> cspice_pos = compute_cspice_pos(mjdj2k_tdb, CentralBody::Sun, CentralBody::Earth); 
+        auto stop = std::chrono::high_resolution_clock::now();
+        double duration_cspice = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count() * 1e-9;
+
+        cspice_runtimes.push_back(duration_cspice); 
+
+        // Compute the position using cspice
+        start = std::chrono::high_resolution_clock::now();
+        std::array<double, 3> jpl_ephem_pos = compute_jpl_ephem_pos(mjdj2k_tdb, CentralBody::Sun, CentralBody::Earth); 
+        stop = std::chrono::high_resolution_clock::now();
+        double duration_jpl = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count() * 1e-9;
+        
+        jpl_ephem_runtimes.push_back(duration_jpl); 
+    }
+
+    // Write to file
+    std::ofstream cspice_file; 
+    cspice_file.open("runtime_cspice.txt"); 
+    for (double runtime : cspice_runtimes) {
+        cspice_file << std::setprecision(10) << runtime << "\n"; 
+    }
+    cspice_file.close(); 
+
+    std::ofstream jpl_file; 
+    jpl_file.open("runtime_jpl_ephem.txt"); 
+    for (double runtime : jpl_ephem_runtimes) {
+        jpl_file << std::setprecision(10) << runtime << "\n"; 
+    }
+    jpl_file.close(); 
+
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
+
 int main() {
     // Load in the SPK kernel from https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/
     furnsh_c("src/de430_1850-2150.bsp");
@@ -252,5 +307,7 @@ int main() {
 
     // Now compute runtimes
     compute_runtimes(mjdj2k_tdb, 100, target_bodies, central_bodies);
+
+    compute_sun_position_runtime(); 
     return 0;
 }

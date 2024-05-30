@@ -1,6 +1,6 @@
 CC = g++
 
-CFLAGS_BASE = -std=c++17 -m64 -fPIC -Wno-psabi
+CFLAGS_BASE = -std=c++20 -m64 -fPIC -Wno-psabi
 CFLAGS_REL = -O3
 CFLAGS_DBG = -g -Wall -Wextra
 

@@ -6,3 +6,6 @@ build/
 *.exe
 *.o
 *.DS_Store
+
+# Ignore text files in example directory 
+example/**/*.txt
