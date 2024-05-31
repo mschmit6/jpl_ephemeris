@@ -249,7 +249,7 @@ void compute_sun_position_runtime() {
     // Getting a random double value
     double random_double = unif(re);
 
-    std::vector<double> cspice_runtimes, jpl_ephem_runtimes; 
+    std::vector<double> cspice_runtimes, jpl_ephem_runtimes, error_norm; 
 
     // Record runtime for cspice library 
     for (unsigned int k = 0; k < 10000; k++) {
@@ -271,6 +271,9 @@ void compute_sun_position_runtime() {
         double duration_jpl = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count() * 1e-9;
         
         jpl_ephem_runtimes.push_back(duration_jpl); 
+
+        // Compute the error in meters
+        error_norm.push_back(compute_error(cspice_pos, jpl_ephem_pos) * 1000.0); 
     }
 
     // Write to file
@@ -288,6 +291,13 @@ void compute_sun_position_runtime() {
     }
     jpl_file.close(); 
 
+
+    std::ofstream err_file; 
+    err_file.open("computed_error.txt"); 
+    for (double error : error_norm) {
+        err_file << std::setprecision(10) << error << "\n"; 
+    }
+    err_file.close(); 
 }
 
 //--------------------------------------------------------------------------------------------------------------------------
@@ -295,7 +305,7 @@ void compute_sun_position_runtime() {
 int main() {
     // Load in the SPK kernel from https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/
     furnsh_c("src/de430_1850-2150.bsp");
-    
+
     // Set inputs
     double mjdj2k_tdb = 0.0;
     double step = 1000; 
